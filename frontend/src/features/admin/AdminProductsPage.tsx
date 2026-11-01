@@ -8,7 +8,6 @@ import {
   RefreshCw
 } from "lucide-react";
 import { productService } from "../../services/productService";
-import { api } from "../../lib/axios";
 import { MOCK_PRODUCTS, MOCK_CATEGORIES, MOCK_BRANDS } from "../../services/mockData";
 import type { ProductListItemDto, CategoryDto, BrandDto } from "../../types/product";
 import { Link } from "react-router-dom";
@@ -36,6 +35,20 @@ export default function AdminProductsPage() {
   const [brandId, setBrandId] = useState("1");
   const [imageUrl, setImageUrl] = useState("");
   const [formError, setFormError] = useState("");
+
+  // Edit product form
+  const [editName, setEditName] = useState("");
+  const [editSku, setEditSku] = useState("");
+  const [editPrice, setEditPrice] = useState("");
+  const [editDiscountPrice, setEditDiscountPrice] = useState("");
+  const [editStock, setEditStock] = useState("10");
+  const [editCategoryId, setEditCategoryId] = useState("1");
+  const [editBrandId, setEditBrandId] = useState("1");
+  const [editImageUrl, setEditImageUrl] = useState("");
+  const [editIsActive, setEditIsActive] = useState(true);
+  const [editFormError, setEditFormError] = useState("");
+  const [editUserEditedSku, setEditUserEditedSku] = useState(false);
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
 
   const loadProducts = () => {
     setIsLoading(true);
@@ -193,31 +206,114 @@ export default function AdminProductsPage() {
     }
   };
 
-  const handleEditStock = (product: ProductListItemDto) => {
+  const handleOpenEdit = async (product: ProductListItemDto) => {
     setEditingProduct(product);
+    setEditName(product.name);
+    setEditSku(product.sku);
+    setEditUserEditedSku(false);
+    setEditPrice(String(product.price));
+    setEditDiscountPrice(product.discountPrice ? String(product.discountPrice) : "");
+    setEditStock(String(product.stockQuantity));
+    setEditCategoryId(String(product.categoryId));
+    setEditBrandId(String(product.brandId));
+    setEditImageUrl(product.primaryImageUrl || "");
+    setEditIsActive(product.inStock);
+    setEditFormError("");
     setShowEditModal(true);
+
+    try {
+      const detail = await productService.getProductById(product.id);
+      if (detail) {
+        if (detail.images && detail.images.length > 0) {
+          const primary = detail.images.find((i) => i.isPrimary) || detail.images[0];
+          setEditImageUrl(primary.imageUrl);
+        }
+        setEditIsActive(detail.isActive);
+      }
+    } catch {
+      // ignore
+    }
   };
 
-  const handleUpdateStock = async (newStock: number) => {
+  const handleUpdateProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!editingProduct) return;
+    setEditFormError("");
+
+    if (!editName.trim() || !editPrice) {
+      setEditFormError("Please fill out product name and price.");
+      return;
+    }
+
+    const priceNum = parseFloat(editPrice);
+    if (isNaN(priceNum) || priceNum <= 0) {
+      setEditFormError("Please enter a valid price greater than 0.");
+      return;
+    }
+
+    const discountNum = editDiscountPrice.trim() ? parseFloat(editDiscountPrice) : null;
+    if (discountNum !== null && (discountNum <= 0 || discountNum >= priceNum)) {
+      setEditFormError("Discount price must be greater than 0 and less than official price.");
+      return;
+    }
+
+    const finalSku = (editSku.trim() || generateSku(editName, editBrandId)).toUpperCase();
+
+    setIsSubmittingEdit(true);
     try {
-      await api.patch(`/admin/inventory/${editingProduct.id}`, { stockQuantity: newStock });
+      await productService.updateProduct(editingProduct.id, {
+        name: editName.trim(),
+        sku: finalSku,
+        price: priceNum,
+        discountPrice: discountNum,
+        stockQuantity: parseInt(editStock) || 0,
+        categoryId: Number(editCategoryId),
+        brandId: Number(editBrandId),
+        isActive: editIsActive,
+        images: editImageUrl.trim()
+          ? [{ imageUrl: editImageUrl.trim(), isPrimary: true, sortOrder: 0 }]
+          : undefined
+      });
+
       loadProducts();
-    } catch (err) {
-      console.warn("Failed to update stock via API, applying locally", err);
-      setProducts(
-        products.map((p) =>
-          p.id === editingProduct.id
-            ? {
-                ...p,
-                stockQuantity: newStock,
-                inStock: newStock > 0
-              }
-            : p
-        )
+      setShowEditModal(false);
+      setEditingProduct(null);
+    } catch (err: any) {
+      if (!err.response) {
+        setEditFormError("تعذر الاتصال بالخادم (Backend is unreachable). يرجى التأكد من تشغيل السيرفر على المنفذ 5132.");
+        return;
+      }
+      if (err.response.status === 401) {
+        setEditFormError("انتهت الجلسة أو لم يتم تسجيل الدخول. يرجى تسجيل الدخول بحساب المسؤول (admin@techxpress.com).");
+        return;
+      }
+      if (err.response.status === 403) {
+        setEditFormError("هذا الحساب لا يملك صلاحية مسؤول (Admin). يرجى تسجيل الدخول بحساب admin@techxpress.com.");
+        return;
+      }
+
+      const resData = err.response?.data;
+      if (resData?.errors && typeof resData.errors === "object") {
+        const errorList: string[] = [];
+        for (const key of Object.keys(resData.errors)) {
+          const val = resData.errors[key];
+          if (Array.isArray(val)) errorList.push(...val);
+          else if (typeof val === "string") errorList.push(val);
+        }
+        if (errorList.length > 0) {
+          setEditFormError(errorList.join(" | "));
+          return;
+        }
+      }
+
+      setEditFormError(
+        resData?.message ||
+        resData?.title ||
+        resData?.detail ||
+        "فشل في تعديل المنتج. يرجى التأكد من صحة البيانات المدخلة."
       );
     } finally {
-      setShowEditModal(false);
+      setIsSubmittingEdit(false);
     }
   };
 
@@ -362,9 +458,9 @@ export default function AdminProductsPage() {
                     <div className="flex items-center justify-end gap-2">
                       <button
                         type="button"
-                        onClick={() => handleEditStock(p)}
+                        onClick={() => handleOpenEdit(p)}
                         className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 cursor-pointer"
-                        title="Edit Stock"
+                        title="Edit Product"
                       >
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
@@ -595,49 +691,223 @@ export default function AdminProductsPage() {
         </div>
       )}
 
-      {/* Edit Stock Modal */}
+      {/* Edit Product Modal */}
       {showEditModal && editingProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-            <h3 className="font-black text-base text-slate-900 mb-1">
-              Adjust Stock Level
-            </h3>
-            <p className="text-xs text-slate-500 mb-4 truncate">
-              {editingProduct.name}
-            </p>
-
-            <div className="mb-4">
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Units in Warehouse
-              </label>
-              <input
-                type="number"
-                min="0"
-                defaultValue={editingProduct.stockQuantity}
-                id="stock-input"
-                className="w-full h-10 px-3 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-none focus:border-indigo-600"
-              />
-            </div>
-
-            <div className="flex gap-2">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-6 sm:p-8 shadow-2xl max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
+              <h3 className="font-black text-base sm:text-lg text-slate-900 flex items-center gap-2">
+                <Edit2 className="w-5 h-5 text-indigo-600" />
+                <span>Edit Hardware Product</span>
+              </h3>
               <button
                 type="button"
                 onClick={() => setShowEditModal(false)}
-                className="flex-1 h-10 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:text-slate-800 flex items-center justify-center text-sm font-bold cursor-pointer"
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const input = document.getElementById("stock-input") as HTMLInputElement;
-                  if (input) handleUpdateStock(parseInt(input.value) || 0);
-                }}
-                className="flex-1 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold cursor-pointer"
-              >
-                Save
+                ✕
               </button>
             </div>
+
+            {!isAdmin && (
+              <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold flex items-center justify-between gap-2">
+                <span>تنبيه: يجب تسجيل الدخول بحساب المسؤول (<code className="font-mono bg-amber-100 px-1 py-0.5 rounded">admin@techxpress.com</code>) لتعديل المنتجات.</span>
+                <Link to="/login" className="px-2.5 py-1 rounded-lg bg-amber-600 text-white font-bold text-[11px] whitespace-nowrap hover:bg-amber-700 transition-colors">
+                  دخول كمسؤول
+                </Link>
+              </div>
+            )}
+
+            {editFormError && (
+              <div className="mb-4 p-3 rounded-xl bg-rose-50 text-rose-700 text-xs font-bold">
+                {editFormError}
+              </div>
+            )}
+
+            <form onSubmit={handleUpdateProduct} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Product Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editName}
+                  onChange={(e) => {
+                    const newName = e.target.value;
+                    setEditName(newName);
+                    if (!editUserEditedSku) {
+                      setEditSku(generateSku(newName, editBrandId));
+                    }
+                  }}
+                  className="w-full h-10 px-3 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-none focus:border-indigo-600"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-slate-700">
+                      SKU Code
+                    </label>
+                    <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1">
+                      <Sparkles className="w-2.5 h-2.5" />
+                      تلقائي
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={editSku}
+                      onChange={(e) => {
+                        setEditSku(e.target.value);
+                        setEditUserEditedSku(true);
+                      }}
+                      className="w-full h-10 px-3 pr-8 rounded-xl border border-slate-200 text-xs font-mono font-bold bg-slate-50 text-slate-800 focus:outline-none focus:border-indigo-600"
+                    />
+                    <button
+                      type="button"
+                      title="إعادة توليد كود SKU تلقائي"
+                      onClick={() => {
+                        setEditSku(generateSku(editName, editBrandId));
+                        setEditUserEditedSku(false);
+                      }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-indigo-600 hover:bg-slate-200/60 rounded-md transition-colors cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Stock Quantity *
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editStock}
+                    onChange={(e) => setEditStock(e.target.value)}
+                    className="w-full h-10 px-3 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-none focus:border-indigo-600"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Category *
+                  </label>
+                  <select
+                    value={editCategoryId}
+                    onChange={(e) => setEditCategoryId(e.target.value)}
+                    className="w-full h-10 px-2 rounded-xl border border-slate-200 text-xs font-semibold bg-white focus:outline-none focus:border-indigo-600"
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Brand *
+                  </label>
+                  <select
+                    value={editBrandId}
+                    onChange={(e) => {
+                      const newBrandId = e.target.value;
+                      setEditBrandId(newBrandId);
+                      if (!editUserEditedSku) {
+                        setEditSku(generateSku(editName, newBrandId));
+                      }
+                    }}
+                    className="w-full h-10 px-2 rounded-xl border border-slate-200 text-xs font-semibold bg-white focus:outline-none focus:border-indigo-600"
+                  >
+                    {brands.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Official Price (EGP) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={editPrice}
+                    onChange={(e) => setEditPrice(e.target.value)}
+                    className="w-full h-10 px-3 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-none focus:border-indigo-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Discount Price (Optional)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editDiscountPrice}
+                    onChange={(e) => setEditDiscountPrice(e.target.value)}
+                    placeholder="Leave empty if no discount"
+                    className="w-full h-10 px-3 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-none focus:border-indigo-600"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Primary Product Image URL
+                </label>
+                <input
+                  type="url"
+                  value={editImageUrl}
+                  onChange={(e) => setEditImageUrl(e.target.value)}
+                  placeholder="https://images.unsplash.com/photo-..."
+                  className="w-full h-10 px-3 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-none focus:border-indigo-600"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="editIsActive"
+                  checked={editIsActive}
+                  onChange={(e) => setEditIsActive(e.target.checked)}
+                  className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                />
+                <label htmlFor="editIsActive" className="text-xs font-bold text-slate-700 cursor-pointer">
+                  Active in Store Catalog (متاح للعرض والشراء)
+                </label>
+              </div>
+
+              <div className="flex gap-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="flex-1 h-10 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingEdit}
+                  className="flex-1 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold shadow-sm cursor-pointer transition-colors"
+                >
+                  {isSubmittingEdit ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
