@@ -30,7 +30,7 @@ export default function CartDrawer() {
       setVisible(false);
       const timer = setTimeout(() => {
         setMounted(false);
-      }, 200);
+      }, 500);
       return () => clearTimeout(timer);
     }
   }, [isCartOpen]);

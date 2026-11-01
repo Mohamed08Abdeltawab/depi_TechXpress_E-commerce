@@ -29,7 +29,7 @@ export default function WishlistDrawer() {
       setVisible(false);
       const timer = setTimeout(() => {
         setMounted(false);
-      }, 200);
+      }, 500);
       return () => clearTimeout(timer);
     }
   }, [isWishlistOpen]);
