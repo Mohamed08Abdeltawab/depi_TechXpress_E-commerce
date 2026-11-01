@@ -21,7 +21,7 @@ export default function AdminDashboard() {
     lowStockCount: 2
   });
 
-  const [recentOrders] = useState<any[]>([
+  const [recentOrders, setRecentOrders] = useState<any[]>([
     {
       id: 101,
       orderNumber: "TXP-2026-948120",
@@ -65,6 +65,30 @@ export default function AdminDashboard() {
       .catch(() => {
         // Fallback to rich mock stats
       });
+
+    // Attempt backend recent orders call
+    api
+      .get("/admin/orders", { params: { pageSize: 5 } })
+      .then((res) => {
+        if (res.data && res.data.items && res.data.items.length > 0) {
+          setRecentOrders(
+            res.data.items.map((o: any) => ({
+              id: o.id,
+              orderNumber: o.orderNumber,
+              customer: o.customerName || "Customer",
+              date: new Date(o.createdAt).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit"
+              }),
+              total: o.totalAmount,
+              status: o.status
+            }))
+          );
+        }
+      })
+      .catch(() => {});
   }, []);
 
   return (

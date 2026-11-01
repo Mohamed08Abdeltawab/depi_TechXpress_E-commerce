@@ -12,6 +12,7 @@ import { EGYPT_GOVERNORATES } from "../types/cart";
 import type { UserDto } from "../types/auth";
 import { authService } from "../services/authService";
 import { productService } from "../services/productService";
+import { cartService } from "../services/cartService";
 import { toast } from "sonner";
 
 interface ShopContextType {
@@ -26,6 +27,7 @@ interface ShopContextType {
   updateCartQty: (productId: number, delta: number) => void;
   removeFromCart: (productId: number) => void;
   clearCart: () => void;
+  syncCartToBackend: () => Promise<boolean>;
   totalCartCount: number;
   cartSubtotal: number;
   isFreeShipping: boolean;
@@ -130,6 +132,31 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     if (authService.isAuthenticated()) {
       const me = await authService.getMe();
       setUser(me);
+      if (me) {
+        // Attempt to fetch backend cart
+        try {
+          const backendCart = await cartService.getCart();
+          if (backendCart && backendCart.items && backendCart.items.length > 0) {
+            setCart(
+              backendCart.items.map((i) => ({
+                id: i.id,
+                productId: i.productId,
+                name: i.name,
+                slug: i.slug,
+                sku: i.sku,
+                imageUrl: i.imageUrl,
+                price: i.unitPrice,
+                originalPrice: i.originalPrice,
+                quantity: i.quantity,
+                stockQuantity: i.stockQuantity,
+                isAvailable: i.isAvailable
+              }))
+            );
+          }
+        } catch {
+          // preserve local cart
+        }
+      }
     } else {
       setUser(null);
     }
@@ -138,7 +165,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
   const refreshProducts = useCallback(async () => {
     setIsLoadingProducts(true);
     try {
-      const res = await productService.getProducts({ pageSize: 24 });
+      const res = await productService.getProducts({ pageSize: 50 });
       setProducts(res.items);
     } finally {
       setIsLoadingProducts(false);
@@ -225,31 +252,85 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       ];
     });
 
+    if (authService.isAuthenticated()) {
+      cartService.addItem(product.id, qty).then((res) => {
+        if (res && res.items) {
+          setCart(
+            res.items.map((i) => ({
+              id: i.id,
+              productId: i.productId,
+              name: i.name,
+              slug: i.slug,
+              sku: i.sku,
+              imageUrl: i.imageUrl || img || undefined,
+              price: i.unitPrice,
+              originalPrice: i.originalPrice,
+              quantity: i.quantity,
+              stockQuantity: i.stockQuantity,
+              isAvailable: i.isAvailable,
+              selectedColor: color
+            }))
+          );
+        }
+      });
+    }
+
     toast.success(`Added "${product.name.slice(0, 32)}..." to cart`);
     setIsCartOpen(true);
   };
 
   const updateCartQty = (productId: number, delta: number) => {
-    setCart((prev) =>
-      prev
-        .map((item) => {
-          if (item.productId === productId) {
-            const nextQty = item.quantity + delta;
-            return nextQty > 0 ? { ...item, quantity: nextQty } : null;
+    setCart((prev) => {
+      const item = prev.find((i) => i.productId === productId);
+      if (item && authService.isAuthenticated() && item.id) {
+        const nextQty = item.quantity + delta;
+        if (nextQty > 0) {
+          cartService.updateItem(item.id, nextQty);
+        } else {
+          cartService.removeItem(item.id);
+        }
+      }
+      return prev
+        .map((it) => {
+          if (it.productId === productId) {
+            const nextQty = it.quantity + delta;
+            return nextQty > 0 ? { ...it, quantity: nextQty } : null;
           }
-          return item;
+          return it;
         })
-        .filter((item): item is CartItem => item !== null)
-    );
+        .filter((it): it is CartItem => it !== null);
+    });
   };
 
   const removeFromCart = (productId: number) => {
+    const item = cart.find((i) => i.productId === productId);
+    if (item && authService.isAuthenticated() && item.id) {
+      cartService.removeItem(item.id);
+    }
     setCart((prev) => prev.filter((item) => item.productId !== productId));
     toast.info("Item removed from cart");
   };
 
   const clearCart = () => {
+    if (authService.isAuthenticated()) {
+      cartService.clearCart();
+    }
     setCart([]);
+  };
+
+  const syncCartToBackend = async (): Promise<boolean> => {
+    if (!authService.isAuthenticated() || cart.length === 0) return true;
+    try {
+      const backendCart = await cartService.getCart();
+      if (backendCart && backendCart.items.length === 0) {
+        for (const item of cart) {
+          await cartService.addItem(item.productId, item.quantity);
+        }
+      }
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   const toggleWishlist = (productId: number) => {
@@ -281,19 +362,37 @@ export function ShopProvider({ children }: { children: ReactNode }) {
   };
 
   const isComparing = (productId: number) => compareList.includes(productId);
-
   const clearCompare = () => setCompareList([]);
 
   const openQuickViewById = async (productId: number) => {
-    const detail = await productService.getProductById(productId);
-    if (detail) {
-      setQuickProduct(detail);
+    try {
+      const full = await productService.getProductById(productId);
+      setQuickProduct(full);
+      // fallback to list item if null
+      if (!full) {
+        const found = products.find((p) => p.id === productId);
+        if (found) {
+          setQuickProduct({
+            ...found,
+            description: "Premium high-grade performance hardware engineered for enthusiasts.",
+            images: found.primaryImageUrl ? [{ id: 1, imageUrl: found.primaryImageUrl, isPrimary: true, sortOrder: 0 }] : [],
+            specifications: [],
+            isActive: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: null
+          });
+        }
+      }
+    } catch {
+      // error handled
     }
   };
 
   const openCheckoutWithProduct = (product: ProductListItemDto | ProductDetailDto) => {
-    addToCart(product, 1);
-    setIsCartOpen(false);
+    const inCart = cart.some((i) => i.productId === product.id);
+    if (!inCart) {
+      addToCart(product, 1);
+    }
     setIsCheckoutOpen(true);
   };
 
@@ -325,6 +424,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
         updateCartQty,
         removeFromCart,
         clearCart,
+        syncCartToBackend,
         totalCartCount,
         cartSubtotal,
         isFreeShipping,

@@ -15,13 +15,28 @@ import {
   getMockProductBySlug
 } from "./mockData";
 
+export interface ProductUpsertPayload {
+  name: string;
+  slug?: string;
+  description?: string;
+  sku?: string;
+  price: number;
+  discountPrice?: number | null;
+  stockQuantity: number;
+  categoryId: number;
+  brandId: number;
+  isActive?: boolean;
+  images?: { imageUrl: string; isPrimary: boolean; sortOrder: number }[];
+  specifications?: { name: string; value: string }[];
+}
+
 export const productService = {
   async getProducts(query: ProductQuery = {}): Promise<PagedResult<ProductListItemDto>> {
     try {
       const res = await api.get<PagedResult<ProductListItemDto>>("/products", {
         params: query
       });
-      if (res.data && Array.isArray(res.data.items) && res.data.items.length > 0) {
+      if (res.data && Array.isArray(res.data.items)) {
         return res.data;
       }
     } catch {
@@ -86,5 +101,19 @@ export const productService = {
       // fallback
     }
     return MOCK_BRANDS;
+  },
+
+  async createProduct(payload: ProductUpsertPayload): Promise<ProductDetailDto> {
+    const res = await api.post<ProductDetailDto>("/products", payload);
+    return res.data;
+  },
+
+  async updateProduct(id: number, payload: ProductUpsertPayload): Promise<ProductDetailDto> {
+    const res = await api.put<ProductDetailDto>(`/products/${id}`, payload);
+    return res.data;
+  },
+
+  async deleteProduct(id: number): Promise<void> {
+    await api.delete(`/products/${id}`);
   }
 };

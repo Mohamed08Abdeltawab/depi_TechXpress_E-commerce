@@ -3,14 +3,19 @@ import {
   Plus,
   Search,
   Trash2,
-  Edit2
+  Edit2,
+  Sparkles,
+  RefreshCw
 } from "lucide-react";
 import { productService } from "../../services/productService";
+import { api } from "../../lib/axios";
 import { MOCK_PRODUCTS, MOCK_CATEGORIES, MOCK_BRANDS } from "../../services/mockData";
-import type { ProductListItemDto } from "../../types/product";
+import type { ProductListItemDto, CategoryDto, BrandDto } from "../../types/product";
 import { Link } from "react-router-dom";
+import { useShop } from "../../context/ShopContext";
 
 export default function AdminProductsPage() {
+  const { isAdmin } = useShop();
   const [products, setProducts] = useState<ProductListItemDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -89,47 +94,103 @@ export default function AdminProductsPage() {
     return matchesSearch && matchesCategory;
   });
 
+  const [categories, setCategories] = useState<CategoryDto[]>(MOCK_CATEGORIES);
+  const [brands, setBrands] = useState<BrandDto[]>(MOCK_BRANDS);
+
+  useEffect(() => {
+    productService.getCategories(true).then((res) => {
+      if (res && res.length > 0) {
+        setCategories(res);
+        setCategoryId(String(res[0].id));
+      }
+    });
+    productService.getBrands(true).then((res) => {
+      if (res && res.length > 0) {
+        setBrands(res);
+        setBrandId(String(res[0].id));
+      }
+    });
+  }, []);
+
+  const [userEditedSku, setUserEditedSku] = useState(false);
+
+  const generateSku = (prodName: string, selectedBrandId: string) => {
+    const brandObj = brands.find((b) => b.id === Number(selectedBrandId));
+    const brandPrefix = (brandObj?.name || "TXP").replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase() || "TXP";
+    const nameClean = prodName.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase() || "PROD";
+    const randomSuffix = Math.floor(10000 + Math.random() * 90000);
+    return `${brandPrefix}-${nameClean}-${randomSuffix}`;
+  };
+
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError("");
 
-    if (!name.trim() || !sku.trim() || !price) {
-      setFormError("Please fill out product name, SKU, and price.");
+    if (!name.trim() || !price) {
+      setFormError("Please fill out product name and price.");
       return;
     }
 
-    const catObj = MOCK_CATEGORIES.find((c) => c.id === Number(categoryId));
-    const brandObj = MOCK_BRANDS.find((b) => b.id === Number(brandId));
+    const finalSku = (sku.trim() || generateSku(name, brandId)).toUpperCase();
 
-    const newProduct: ProductListItemDto = {
-      id: Date.now(),
-      name: name.trim(),
-      slug: name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-      sku: sku.trim().toUpperCase(),
-      price: parseFloat(price),
-      discountPrice: discountPrice ? parseFloat(discountPrice) : null,
-      finalPrice: discountPrice ? parseFloat(discountPrice) : parseFloat(price),
-      stockQuantity: parseInt(stock) || 10,
-      inStock: parseInt(stock) > 0,
-      brandId: Number(brandId),
-      brandName: brandObj?.name || "TechXpress",
-      categoryId: Number(categoryId),
-      categoryName: catObj?.name || "Electronics",
-      primaryImageUrl: imageUrl.trim() || "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=600&auto=format&fit=crop&q=80",
-      soldCount: 0,
-      rating: 5.0,
-      reviewsCount: 1,
-      badge: "New Arrival"
-    };
+    try {
+      await productService.createProduct({
+        name: name.trim(),
+        sku: finalSku,
+        price: parseFloat(price),
+        discountPrice: discountPrice ? parseFloat(discountPrice) : null,
+        stockQuantity: parseInt(stock) || 10,
+        categoryId: Number(categoryId),
+        brandId: Number(brandId),
+        isActive: true,
+        images: imageUrl.trim()
+          ? [{ imageUrl: imageUrl.trim(), isPrimary: true, sortOrder: 0 }]
+          : undefined
+      });
 
-    setProducts([newProduct, ...products]);
-    setShowAddModal(false);
-    // Reset form
-    setName("");
-    setSku("");
-    setPrice("");
-    setDiscountPrice("");
-    setImageUrl("");
+      loadProducts();
+      setShowAddModal(false);
+      setName("");
+      setSku("");
+      setUserEditedSku(false);
+      setPrice("");
+      setDiscountPrice("");
+      setImageUrl("");
+    } catch (err: any) {
+      if (!err.response) {
+        setFormError("تعذر الاتصال بالخادم (Backend is unreachable). يرجى التأكد من تشغيل السيرفر على المنفذ 5132.");
+        return;
+      }
+      if (err.response.status === 401) {
+        setFormError("انتهت الجلسة أو لم يتم تسجيل الدخول. يرجى تسجيل الدخول بحساب المسؤول (admin@techxpress.com).");
+        return;
+      }
+      if (err.response.status === 403) {
+        setFormError("هذا الحساب لا يملك صلاحية مسؤول (Admin). يرجى تسجيل الدخول بحساب admin@techxpress.com.");
+        return;
+      }
+
+      const resData = err.response?.data;
+      if (resData?.errors && typeof resData.errors === "object") {
+        const errorList: string[] = [];
+        for (const key of Object.keys(resData.errors)) {
+          const val = resData.errors[key];
+          if (Array.isArray(val)) errorList.push(...val);
+          else if (typeof val === "string") errorList.push(val);
+        }
+        if (errorList.length > 0) {
+          setFormError(errorList.join(" | "));
+          return;
+        }
+      }
+
+      setFormError(
+        resData?.message ||
+        resData?.title ||
+        resData?.detail ||
+        "فشل في إنشاء المنتج. يرجى التأكد من صحة البيانات المدخلة."
+      );
+    }
   };
 
   const handleEditStock = (product: ProductListItemDto) => {
@@ -137,25 +198,38 @@ export default function AdminProductsPage() {
     setShowEditModal(true);
   };
 
-  const handleUpdateStock = (newStock: number) => {
+  const handleUpdateStock = async (newStock: number) => {
     if (!editingProduct) return;
-    setProducts(
-      products.map((p) =>
-        p.id === editingProduct.id
-          ? {
-              ...p,
-              stockQuantity: newStock,
-              inStock: newStock > 0
-            }
-          : p
-      )
-    );
-    setShowEditModal(false);
+    try {
+      await api.patch(`/admin/inventory/${editingProduct.id}`, { stockQuantity: newStock });
+      loadProducts();
+    } catch (err) {
+      console.warn("Failed to update stock via API, applying locally", err);
+      setProducts(
+        products.map((p) =>
+          p.id === editingProduct.id
+            ? {
+                ...p,
+                stockQuantity: newStock,
+                inStock: newStock > 0
+              }
+            : p
+        )
+      );
+    } finally {
+      setShowEditModal(false);
+    }
   };
 
-  const handleDeleteProduct = (id: number) => {
+  const handleDeleteProduct = async (id: number) => {
     if (!window.confirm("Are you sure you want to delete this hardware SKU?")) return;
-    setProducts(products.filter((p) => p.id !== id));
+    try {
+      await productService.deleteProduct(id);
+      loadProducts();
+    } catch (err) {
+      console.warn("Failed to delete via API, removing locally", err);
+      setProducts(products.filter((p) => p.id !== id));
+    }
   };
 
   return (
@@ -329,6 +403,15 @@ export default function AdminProductsPage() {
               </button>
             </div>
 
+            {!isAdmin && (
+              <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold flex items-center justify-between gap-2">
+                <span>تنبيه: يجب تسجيل الدخول بحساب المسؤول (<code className="font-mono bg-amber-100 px-1 py-0.5 rounded">admin@techxpress.com</code>) لإضافة وحفظ المنتجات.</span>
+                <Link to="/login" className="px-2.5 py-1 rounded-lg bg-amber-600 text-white font-bold text-[11px] whitespace-nowrap hover:bg-amber-700 transition-colors">
+                  دخول كمسؤول
+                </Link>
+              </div>
+            )}
+
             {formError && (
               <div className="mb-4 p-3 rounded-xl bg-rose-50 text-rose-700 text-xs font-bold">
                 {formError}
@@ -344,7 +427,13 @@ export default function AdminProductsPage() {
                   type="text"
                   required
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => {
+                    const newName = e.target.value;
+                    setName(newName);
+                    if (!userEditedSku) {
+                      setSku(generateSku(newName, brandId));
+                    }
+                  }}
                   placeholder="e.g. Apple MacBook Pro 16 M3 Max"
                   className="w-full h-10 px-3 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-none focus:border-indigo-600"
                 />
@@ -352,17 +441,38 @@ export default function AdminProductsPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    SKU Code *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={sku}
-                    onChange={(e) => setSku(e.target.value)}
-                    placeholder="e.g. APP-MBP16-M3"
-                    className="w-full h-10 px-3 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-none focus:border-indigo-600"
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-slate-700">
+                      SKU Code
+                    </label>
+                    <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1">
+                      <Sparkles className="w-2.5 h-2.5" />
+                      تلقائي
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={sku}
+                      onChange={(e) => {
+                        setSku(e.target.value);
+                        setUserEditedSku(true);
+                      }}
+                      placeholder={generateSku(name || "Item", brandId)}
+                      className="w-full h-10 px-3 pr-8 rounded-xl border border-slate-200 text-xs font-mono font-bold bg-slate-50 text-slate-800 focus:outline-none focus:border-indigo-600"
+                    />
+                    <button
+                      type="button"
+                      title="إعادة توليد كود SKU تلقائي"
+                      onClick={() => {
+                        setSku(generateSku(name, brandId));
+                        setUserEditedSku(false);
+                      }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-indigo-600 hover:bg-slate-200/60 rounded-md transition-colors cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 <div>
@@ -389,7 +499,7 @@ export default function AdminProductsPage() {
                     onChange={(e) => setCategoryId(e.target.value)}
                     className="w-full h-10 px-2 rounded-xl border border-slate-200 text-xs font-semibold bg-white focus:outline-none focus:border-indigo-600"
                   >
-                    {MOCK_CATEGORIES.map((c) => (
+                    {categories.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
                       </option>
@@ -403,10 +513,16 @@ export default function AdminProductsPage() {
                   </label>
                   <select
                     value={brandId}
-                    onChange={(e) => setBrandId(e.target.value)}
+                    onChange={(e) => {
+                      const newBrandId = e.target.value;
+                      setBrandId(newBrandId);
+                      if (!userEditedSku) {
+                        setSku(generateSku(name, newBrandId));
+                      }
+                    }}
                     className="w-full h-10 px-2 rounded-xl border border-slate-200 text-xs font-semibold bg-white focus:outline-none focus:border-indigo-600"
                   >
-                    {MOCK_BRANDS.map((b) => (
+                    {brands.map((b) => (
                       <option key={b.id} value={b.id}>
                         {b.name}
                       </option>

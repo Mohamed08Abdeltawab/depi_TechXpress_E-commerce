@@ -17,6 +17,7 @@ export default function CheckoutModal() {
     setSelectedGov,
     clearCart,
     cart,
+    syncCartToBackend,
     isAuthenticated
   } = useShop();
 
@@ -56,10 +57,11 @@ export default function CheckoutModal() {
     setFormErrors({});
 
     try {
-      const randomRef = `TXP-${Date.now().toString().slice(-6)}`;
+      let activeRef = `TXP-${Date.now().toString().slice(-6)}`;
 
       if (isAuthenticated) {
         try {
+          await syncCartToBackend();
           const address = await orderService.createAddress({
             recipientName: customerName.trim(),
             phoneNumber: customerPhone.trim(),
@@ -68,22 +70,25 @@ export default function CheckoutModal() {
             isDefault: true
           });
 
-          await orderService.createOrder({
+          const created = await orderService.createOrder({
             addressId: address.id,
-            paymentMethod
+            paymentMethod: "CashOnDelivery"
           });
-        } catch {
-          // If server call fails, still honor client order reference
+          if (created && created.orderNumber) {
+            activeRef = created.orderNumber;
+          }
+        } catch (err) {
+          console.warn("Backend order creation error, using fallback reference:", err);
         }
       }
 
       // WhatsApp tracking message
       const itemsList = cart.map((i) => `• ${i.name} (Qty: ${i.quantity})`).join("\n");
-      const msg = `Hello TechXpress,\nI have submitted Order *#${randomRef}*:\nCustomer: ${customerName}\nPhone: ${customerPhone}\nCity: ${selectedGov.name}\nAddress: ${customerAddress}\nPayment: ${paymentMethod === 'CashOnDelivery' ? 'Cash on Delivery (after inspection)' : 'Digital / InstaPay'}\n\n*Items:*\n${itemsList}\n\n*Total Amount:* ${cartTotal.toLocaleString()} EGP`;
+      const msg = `Hello TechXpress,\nI have submitted Order *#${activeRef}*:\nCustomer: ${customerName}\nPhone: ${customerPhone}\nCity: ${selectedGov.name}\nAddress: ${customerAddress}\nPayment: ${paymentMethod === 'CashOnDelivery' ? 'Cash on Delivery (after inspection)' : 'Digital / InstaPay'}\n\n*Items:*\n${itemsList}\n\n*Total Amount:* ${cartTotal.toLocaleString()} EGP`;
       const waUrl = `https://wa.me/201065712366?text=${encodeURIComponent(msg)}`;
 
       setCompletedOrder({
-        orderRef: randomRef,
+        orderRef: activeRef,
         whatsappUrl: waUrl
       });
       clearCart();

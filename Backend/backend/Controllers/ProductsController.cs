@@ -1,4 +1,4 @@
-﻿using backend.Data;
+using backend.Data;
 using backend.DTOs.Products;
 using backend.Helpers;
 using backend.Models;
@@ -126,6 +126,7 @@ public class ProductsController : ControllerBase
 
         var product = new Product { CreatedAt = DateTime.UtcNow, Slug = slug };
         ApplyScalars(product, req);
+        product.Sku = await ResolveSkuAsync(req.Sku, req.BrandId, req.Name, null);
         AddChildren(product, req);
 
         _db.Products.Add(product);
@@ -277,10 +278,13 @@ public class ProductsController : ControllerBase
         if (!await _db.Categories.AnyAsync(c => c.Id == r.CategoryId))
             return BadRequest(ApiResponse.Fail("Category does not exist."));
 
-        var sku = r.Sku.Trim();
-        var ignore = existingId ?? 0;
-        if (await _db.Products.AnyAsync(p => p.Sku == sku && p.Id != ignore))
-            return Conflict(ApiResponse.Fail("A product with this SKU already exists."));
+        if (!string.IsNullOrWhiteSpace(r.Sku))
+        {
+            var sku = r.Sku.Trim();
+            var ignore = existingId ?? 0;
+            if (await _db.Products.AnyAsync(p => p.Sku == sku && p.Id != ignore))
+                return Conflict(ApiResponse.Fail("A product with this SKU already exists."));
+        }
 
         if (r.Specifications is not null)
         {
@@ -312,11 +316,34 @@ public class ProductsController : ControllerBase
         return slug;
     }
 
+    private async Task<string> ResolveSkuAsync(string? requested, int brandId, string name, int? ignoreId)
+    {
+        var ignore = ignoreId ?? 0;
+        if (!string.IsNullOrWhiteSpace(requested))
+            return requested.Trim().ToUpperInvariant();
+
+        var brandName = await _db.Brands.Where(b => b.Id == brandId).Select(b => b.Name).FirstOrDefaultAsync() ?? "TXP";
+        var brandCode = new string(brandName.Where(char.IsLetterOrDigit).Take(4).ToArray()).ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(brandCode)) brandCode = "TXP";
+
+        var nameClean = new string(name.Where(char.IsLetterOrDigit).Take(4).ToArray()).ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(nameClean)) nameClean = "PROD";
+
+        string candidate;
+        do
+        {
+            var randomNum = System.Security.Cryptography.RandomNumberGenerator.GetInt32(100000, 999999);
+            candidate = $"{brandCode}-{nameClean}-{randomNum}";
+        } while (await _db.Products.AnyAsync(p => p.Sku == candidate && p.Id != ignore));
+
+        return candidate;
+    }
+
     private static void ApplyScalars(Product p, ProductUpsertRequest r)
     {
         p.Name = r.Name.Trim();
         p.Description = r.Description?.Trim();
-        p.Sku = r.Sku.Trim();
+        if (!string.IsNullOrWhiteSpace(r.Sku)) p.Sku = r.Sku.Trim().ToUpperInvariant();
         p.Price = r.Price;
         p.DiscountPrice = r.DiscountPrice;
         p.StockQuantity = r.StockQuantity;

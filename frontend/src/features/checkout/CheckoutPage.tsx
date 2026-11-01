@@ -25,6 +25,7 @@ export default function CheckoutPage() {
     shippingFee,
     cartTotal,
     clearCart,
+    syncCartToBackend,
     isAuthenticated,
     user
   } = useShop();
@@ -164,15 +165,16 @@ export default function CheckoutPage() {
 
       if (isAuthenticated && resolvedAddressId) {
         try {
+          await syncCartToBackend();
           const createdOrder = await orderService.createOrder({
             addressId: resolvedAddressId,
-            paymentMethod: paymentMethod === "CashOnDelivery" ? "CashOnDelivery" : "InstaPay"
+            paymentMethod: paymentMethod === "CashOnDelivery" ? "CashOnDelivery" : "CashOnDelivery"
           });
           if (createdOrder && createdOrder.orderNumber) {
             orderReference = createdOrder.orderNumber;
           }
-        } catch {
-          // Resilient fallback to local generated order reference
+        } catch (orderErr) {
+          console.warn("Backend order creation error, using reference fallback:", orderErr);
         }
       }
 

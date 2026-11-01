@@ -70,21 +70,16 @@ export default function RegisterPage() {
       refreshUser();
       navigate("/profile");
     } catch (err: any) {
-      // Offline / dev fallback: if backend is offline, log in locally
-      const mockUser = {
-        token: "mock-registered-token",
-        expiresAt: new Date(Date.now() + 86400000).toISOString(),
-        user: {
-          id: `usr-${Date.now()}`,
-          fullName: fullName.trim(),
-          email: email.trim(),
-          roles: ["Customer"]
-        }
-      };
-      localStorage.setItem("techxpress_token", mockUser.token);
-      localStorage.setItem("techxpress_user", JSON.stringify(mockUser.user));
-      refreshUser();
-      navigate("/profile");
+      if (err?.response?.data?.message) {
+        setErrorMsg(err.response.data.message);
+      } else if (err?.response?.data?.errors) {
+        const errorValues = Object.values(err.response.data.errors).flat();
+        setErrorMsg(errorValues.join(" "));
+      } else if (err?.code === "ERR_NETWORK") {
+        setErrorMsg("Unable to connect to TechXpress backend server. Please verify backend is running on http://localhost:5132.");
+      } else {
+        setErrorMsg(err?.message || "Registration failed. Please check your data.");
+      }
     } finally {
       setIsLoading(false);
     }

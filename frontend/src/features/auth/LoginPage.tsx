@@ -55,48 +55,18 @@ export default function LoginPage() {
         navigate(from);
       }
     } catch (err: any) {
-      // If offline/demo fallback
-      if (
-        email.toLowerCase().includes("admin") &&
-        password.length >= 6
-      ) {
-        const mockAdmin = {
-          token: "mock-admin-token",
-          expiresAt: new Date(Date.now() + 86400000).toISOString(),
-          user: {
-            id: "admin-1",
-            fullName: "TechXpress Administrator",
-            email: email.trim(),
-            roles: ["Admin", "Customer"]
-          }
-        };
-        localStorage.setItem("techxpress_token", mockAdmin.token);
-        localStorage.setItem("techxpress_user", JSON.stringify(mockAdmin.user));
-        refreshUser();
-        navigate("/admin");
-        return;
-      } else if (password.length >= 6) {
-        const mockUser = {
-          token: "mock-user-token",
-          expiresAt: new Date(Date.now() + 86400000).toISOString(),
-          user: {
-            id: "user-1",
-            fullName: email.split("@")[0] || "Valued Customer",
-            email: email.trim(),
-            roles: ["Customer"]
-          }
-        };
-        localStorage.setItem("techxpress_token", mockUser.token);
-        localStorage.setItem("techxpress_user", JSON.stringify(mockUser.user));
-        refreshUser();
-        navigate(from);
-        return;
+      if (err?.response?.data?.message) {
+        setErrorMsg(err.response.data.message);
+      } else if (err?.response?.data?.errors) {
+        const errorValues = Object.values(err.response.data.errors).flat();
+        setErrorMsg(errorValues.join(" "));
+      } else if (err?.response?.status === 401) {
+        setErrorMsg("Invalid email or password.");
+      } else if (err?.code === "ERR_NETWORK") {
+        setErrorMsg("Unable to connect to TechXpress backend server. Please verify backend is running on http://localhost:5132.");
+      } else {
+        setErrorMsg(err?.message || "Login failed. Please check your credentials.");
       }
-
-      setErrorMsg(
-        err?.response?.data?.message ||
-        "Invalid email or password. Please verify your credentials or use the demo buttons below."
-      );
     } finally {
       setIsLoading(false);
     }
@@ -104,11 +74,11 @@ export default function LoginPage() {
 
   const fillCredentials = (type: "customer" | "admin") => {
     if (type === "admin") {
-      setEmail("admin@techxpress.eg");
-      setPassword("AdminPass123!");
+      setEmail("admin@techxpress.com");
+      setPassword("Admin12345!");
     } else {
-      setEmail("customer@techxpress.eg");
-      setPassword("CustomerPass123!");
+      setEmail("customer@techxpress.com");
+      setPassword("Customer12345!");
     }
   };
 

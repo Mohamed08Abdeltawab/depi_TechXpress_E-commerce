@@ -55,10 +55,14 @@ export default function HomePage() {
 
 
   // Filter Laptops & Computers
-  const laptops = products.filter((p) => p.categoryId === 1).slice(0, 4);
+  const laptops = products
+    .filter((p) => p.categoryId === 1 || p.categoryName?.toLowerCase().includes("laptop"))
+    .slice(0, 4);
 
   // Filter Smartphones & Tablets
-  const smartphones = products.filter((p) => p.categoryId === 2).slice(0, 4);
+  const smartphones = products
+    .filter((p) => p.categoryId === 2 || p.categoryName?.toLowerCase().includes("smart") || p.categoryName?.toLowerCase().includes("phone"))
+    .slice(0, 4);
 
   // Deal Product
   const dealProduct = products.find((p) => p.id === 1) || products[0];

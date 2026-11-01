@@ -3,7 +3,9 @@ import { useSearchParams, Link } from "react-router-dom";
 import { Search, Filter, RotateCcw, Cpu } from "lucide-react";
 import { useShop } from "../../context/ShopContext";
 import ProductCard from "./ProductCard";
+import { productService } from "../../services/productService";
 import { MOCK_CATEGORIES, MOCK_BRANDS } from "../../services/mockData";
+import type { CategoryDto, BrandDto } from "../../types/product";
 
 export default function ProductsPage() {
   const { products, isLoadingProducts } = useShop();
@@ -28,6 +30,18 @@ export default function ProductsPage() {
   const [minPrice, setMinPrice] = useState<number | "">("");
   const [maxPrice, setMaxPrice] = useState<number | "">("");
   const [showMobileFilters, setShowMobileFilters] = useState(false);
+
+  const [categories, setCategories] = useState<CategoryDto[]>(MOCK_CATEGORIES);
+  const [brands, setBrands] = useState<BrandDto[]>(MOCK_BRANDS);
+
+  useEffect(() => {
+    productService.getCategories().then((res) => {
+      if (res && res.length > 0) setCategories(res);
+    });
+    productService.getBrands().then((res) => {
+      if (res && res.length > 0) setBrands(res);
+    });
+  }, []);
 
   // Sync with searchParams when URL changes
   useEffect(() => {
@@ -139,7 +153,7 @@ export default function ProductsPage() {
               <>
                 <span>/</span>
                 <span className="text-cyan-400">
-                  {MOCK_CATEGORIES.find((c) => c.id === activeCategory)?.name || "Category"}
+                  {categories.find((c) => c.id === activeCategory)?.name || "Category"}
                 </span>
               </>
             )}
@@ -193,7 +207,7 @@ export default function ProductsPage() {
             >
               All Electronics
             </button>
-            {MOCK_CATEGORIES.map((cat) => (
+            {categories.map((cat) => (
               <button
                 key={cat.id}
                 type="button"
@@ -228,7 +242,7 @@ export default function ProductsPage() {
               >
                 All
               </button>
-              {MOCK_BRANDS.map((b) => (
+              {brands.map((b) => (
                 <button
                   key={b.id}
                   type="button"
@@ -310,7 +324,7 @@ export default function ProductsPage() {
                   >
                     All Brands
                   </button>
-                  {MOCK_BRANDS.map((b) => (
+                  {brands.map((b) => (
                     <button
                       key={b.id}
                       type="button"

@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using backend.Helpers;
 
 namespace backend.DTOs.Products;
@@ -57,7 +57,8 @@ public class ProductUpsertRequest
     /// <summary>اختياري: لو فاضي يتولّد من الاسم.</summary>
     [MaxLength(280)] public string? Slug { get; set; }
     public string? Description { get; set; }
-    [Required, MaxLength(100)] public string Sku { get; set; } = string.Empty;
+    /// <summary>اختياري: لو فاضي يتولّد تلقائياً.</summary>
+    [MaxLength(100)] public string? Sku { get; set; }
     [Range(0.01, 10_000_000)] public decimal Price { get; set; }
     /// <summary>السعر بعد الخصم (مش نسبة). لازم يكون أقل من Price.</summary>
     public decimal? DiscountPrice { get; set; }
