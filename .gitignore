@@ -27,6 +27,8 @@ coverage/
 ## =====================================
 .vs/
 .vscode/*
+.archify/*
+.agents/*
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
